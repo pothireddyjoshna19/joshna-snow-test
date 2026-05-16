@@ -1,0 +1,73 @@
+CREATE DATABASE AWS_INT;
+USE DATABASE AWS_INT;
+CREATE SCHEMA FILE_FORMATS;
+CREATE SCHEMA EXT_STAGES;
+
+CREATE STORAGE INTEGRATION s3_pipe
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'S3'
+  STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::291883201267:role/joshna-s3role'
+  ENABLED = TRUE
+  STORAGE_ALLOWED_LOCATIONS = ('s3://joshna-snow-20/csv/','s3://joshna-snow-20/json/','s3://joshna-snow-20/EMP/');
+
+  DESC INTEGRATION s3_pipe;
+  
+  CREATE OR REPLACE FILE FORMAT AWS_INT.file_formats.csv_fileformat
+    TYPE = CSV
+    FIELD_DELIMITER = ','
+    SKIP_HEADER = 1
+    NULL_IF = ('NULL', 'null')
+    EMPTY_FIELD_AS_NULL = TRUE
+    FIELD_OPTIONALLY_ENCLOSED_BY = '"';
+
+    CREATE OR REPLACE STAGE AWS_INT.ext_stages.csv_folder
+    URL = 's3://joshna-snow-20/EMP/'
+    STORAGE_INTEGRATION = s3_pipe
+    FILE_FORMAT = AWS_INT.file_formats.csv_fileformat;
+
+    LIST @AWS_INT.ext_stages.csv_folder;
+
+CREATE OR REPLACE TABLE AWS_INT.PUBLIC.employee_data (
+  id STRING,
+  first_name STRING,
+  last_name STRING,
+  email STRING,
+  city STRING,
+  department STRING
+);
+
+COPY INTO AWS_INT.PUBLIC.employee_data
+  FROM @AWS_INT.ext_stages.csv_folder/employee_data_1.csv
+  ON_ERROR = 'SKIP_FILE';
+
+SELECT * FROM AWS_INT.PUBLIC.employee_data;
+
+CREATE OR REPLACE PIPE AWS_INT.PUBLIC.emp_pipe
+  AUTO_INGEST = TRUE
+  AS
+  COPY INTO AWS_INT.PUBLIC.employee_data
+    FROM @AWS_INT.ext_stages.csv_folder
+    ON_ERROR = 'SKIP_FILE';
+
+DESCRIBE PIPE AWS_INT.PUBLIC.emp_pipe;
+
+ALTER PIPE AWS_INT.PUBLIC.emp_pipe REFRESH;
+
+SHOW PIPES IN DATABASE AWS_INT;
+
+SELECT SYSTEM$PIPE_STATUS('AWS_INT.PUBLIC.emp_pipe');
+
+ALTER PIPE AWS_INT.PUBLIC.movie_pipe SET PIPE_EXECUTION_PAUSED = TRUE;
+
+ALTER PIPE AWS_INT.PUBLIC.movie_pipe SET PIPE_EXECUTION_PAUSED = FALSE;
+
+
+
+
+SELECT * FROM AWS_INT.PUBLIC.employee_data;
+
+
+
+
+
+
