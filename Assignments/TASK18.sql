@@ -1,0 +1,84 @@
+CREATE or replace TABLE OMS_DEV.BRONZE.CUSTOMER_12 (
+    CID INT,
+    CNAME VARCHAR(10),
+    ADDRESS VARCHAR(10)
+);
+
+INSERT INTO OMS_DEV.BRONZE.CUSTOMER_12 (CID, CNAME, ADDRESS) VALUES
+--(11, 'Alice', 'New York'),
+--(2, 'Bob', 'Chicago'),
+--(3, 'Charlie', 'Dallas'),
+(4, 'Diana', 'Seattle'),
+(5, 'Eve', 'Boston');
+
+
+--update OMS_DEV.BRONZE.CUSTOMER_12
+          set ADDRESS = 'blr'
+    where cid = 4 ;
+   
+--delete from OMS_DEV.BRONZE.CUSTOMER_12 where cid = 11;
+
+select * from  OMS_DEV.BRONZE.CUSTOMER_12 ;
+
+--delete from   OMS_DEV.BRONZE.CUSTOMER_12;
+
+
+CREATE or replace TABLE OMS_DEV.silver.CUSTOMER_tgts  clone
+OMS_DEV.BRONZE.CUSTOMER_12 ;
+---------------------
+
+CREATE or replace TABLE OMS_DEV.silver.CUSTOMER_tgts (
+    CID INT,
+    CNAME VARCHAR(10),
+    ADDRESS VARCHAR(10)
+);
+
+
+
+select * from  OMS_DEV.silver.CUSTOMER_tgts  ;
+
+CREATE or replace TABLE OMS_DEV.silver.CUSTOMER_tgts  clone
+OMS_DEV.BRONZE.CUSTOMER_12 ;
+
+-------------------------------
+-- Recreate stream after base table was replaced (CREATE OR REPLACE TABLE invalidates existing streams)
+create or replace stream OMS_DEV.BRONZE.CUSTOMER_streams on table OMS_DEV.BRONZE.CUSTOMER_12 ;
+
+-- NOTE: Run DML (INSERT/UPDATE/DELETE) on CUSTOMER_12 AFTER creating the stream to capture changes.
+-- The stream will only capture changes that happen AFTER its creation.
+
+select * from OMS_DEV.BRONZE.CUSTOMER_streams;
+
+MERGE INTO OMS_DEV.SILVER.CUSTOMER_TGTS AS tgt
+USING OMS_DEV.BRONZE.CUSTOMER_STREAMS AS src
+ON tgt.CID = src.CID
+WHEN MATCHED AND src.METADATA$ACTION = 'DELETE' AND src.METADATA$ISUPDATE = FALSE THEN
+    DELETE
+WHEN MATCHED AND src.METADATA$ACTION = 'INSERT' AND src.METADATA$ISUPDATE = TRUE THEN
+    UPDATE SET tgt.CNAME = src.CNAME, tgt.ADDRESS = src.ADDRESS
+WHEN NOT MATCHED AND src.METADATA$ACTION = 'INSERT' THEN
+    INSERT (CID, CNAME, ADDRESS) VALUES (src.CID, src.CNAME, src.ADDRESS);
+
+CREATE OR REPLACE TASK OMS_DEV.BRONZE.CUSTOMER_MERGE_TASK
+    WAREHOUSE = 'COMPUTE_WH'
+    SCHEDULE = '1 MINUTE'
+WHEN
+    SYSTEM$STREAM_HAS_DATA('OMS_DEV.BRONZE.CUSTOMER_STREAMS')
+AS
+    MERGE INTO OMS_DEV.SILVER.CUSTOMER_TGTS AS tgt
+    USING OMS_DEV.BRONZE.CUSTOMER_STREAMS AS src
+    ON tgt.CID = src.CID
+    WHEN MATCHED AND src.METADATA$ACTION = 'DELETE' AND src.METADATA$ISUPDATE = FALSE THEN
+        DELETE
+    WHEN MATCHED AND src.METADATA$ACTION = 'INSERT' AND src.METADATA$ISUPDATE = TRUE THEN
+        UPDATE SET tgt.CNAME = src.CNAME, tgt.ADDRESS = src.ADDRESS
+    WHEN NOT MATCHED AND src.METADATA$ACTION = 'INSERT' THEN
+        INSERT (CID, CNAME, ADDRESS) VALUES (src.CID, src.CNAME, src.ADDRESS);
+
+show tasks;
+
+ALTER TASK OMS_DEV.BRONZE.CUSTOMER_MERGE_TASK RESUME;
+ALTER TASK OMS_DEV.BRONZE.CUSTOMER_TASK SUSPEND;
+
+
+
